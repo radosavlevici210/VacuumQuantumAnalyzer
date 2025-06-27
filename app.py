@@ -60,7 +60,26 @@ Violations will result in legal action.
 - **NDA License**: Confidential research
 
 Contact for licensing information.
+
+---
+### Performance Monitor
 """)
+
+# Add performance statistics
+if st.session_state.performance_stats['total_calculations'] > 0:
+    success_rate = (st.session_state.performance_stats['successful_calculations'] / 
+                   st.session_state.performance_stats['total_calculations'] * 100)
+    
+    st.sidebar.metric("Total Calculations", st.session_state.performance_stats['total_calculations'])
+    st.sidebar.metric("Success Rate", f"{success_rate:.1f}%")
+    st.sidebar.metric("Failed Calculations", st.session_state.performance_stats['failed_calculations'])
+    
+    # Performance stats from monitor
+    perf_stats = performance_monitor.get_performance_stats()
+    if "average_calculation_time" in perf_stats:
+        st.sidebar.metric("Avg Calc Time", f"{perf_stats['average_calculation_time']:.3f}s")
+
+st.sidebar.markdown("---")
 
 # Main title
 st.title("⚛️ Scientific Calculator")
@@ -322,61 +341,171 @@ with tab2:
         st.subheader("Results")
         
         if calculate_quantum:
+            start_time = time.time()
+            log_user_interaction("quantum_genetics_calculation", {
+                "population_size": population_size,
+                "quantum_state_amplitude": quantum_state_amplitude,
+                "coherence_time": coherence_time,
+                "barrier_height": barrier_height,
+                "particle_energy": particle_energy,
+                "selection_pressure": selection_pressure,
+                "mutation_rate": mutation_rate,
+                "generation_count": generation_count
+            })
+            
             try:
+                # Validate input parameters
+                limits = ProductionConfig.get_calculation_limits()
+                validate_input_range(population_size, limits["population_size"]["min"], 
+                                   limits["population_size"]["max"], "Population Size")
+                
+                if not 0 <= quantum_state_amplitude <= 1:
+                    raise ValueError("Quantum State Amplitude must be between 0 and 1")
+                if not 0 <= mutation_rate <= 1:
+                    raise ValueError("Mutation Rate must be between 0 and 1")
+                if coherence_time <= 0:
+                    raise ValueError("Coherence Time must be positive")
+                
+                # Perform calculation with error handling
                 calculator = QuantumGeneticsCalculator()
-                results = calculator.calculate_all(
+                calculation_result = safe_calculation(
+                    calculator.calculate_all,
                     population_size, quantum_state_amplitude, coherence_time,
                     barrier_height, particle_energy, selection_pressure,
                     mutation_rate, generation_count
                 )
                 
-                # Display results in a formatted way
-                st.success("Calculations completed successfully!")
+                execution_time = time.time() - start_time
                 
-                # Create metrics display
-                col2a, col2b = st.columns(2)
+                if calculation_result["success"]:
+                    results = calculation_result["result"]
+                    
+                    # Update performance stats
+                    st.session_state.performance_stats['total_calculations'] += 1
+                    st.session_state.performance_stats['successful_calculations'] += 1
+                    performance_monitor.record_calculation(execution_time, True)
+                    
+                    display_success_message("Quantum Genetics Calculation", execution_time)
+                    
+                    # Create results summary
+                    results_df = create_results_summary(results)
+                    
+                    # Display results in tabs
+                    res_tab1, res_tab2, res_tab3 = st.tabs(["📊 Results", "📈 Summary", "📁 Export"])
+                    
+                    with res_tab1:
+                        # Create metrics display
+                        col2a, col2b = st.columns(2)
+                        
+                        with col2a:
+                            st.metric("Genetic Superposition", f"{results['geneticSuperposition']}")
+                            st.metric("Quantum Coherence", f"{results['quantumCoherence']}")
+                            st.metric("Tunnel Probability", f"{results['tunnelProbability']}")
+                            st.metric("Quantum Leap Potential", f"{results['quantumLeapPotential']}")
+                        
+                        with col2b:
+                            st.metric("Fitness Gradient", f"{results['fitnessGradient']}")
+                            st.metric("Speciation Probability", f"{results['speciationProbability']}")
+                            st.metric("Evolution Acceleration", f"{results['evolutionAcceleration']}")
+                            st.metric("Next Evolution Step", f"{results['nextEvolutionStep']}")
+                    
+                    with res_tab2:
+                        st.subheader("Calculation Summary")
+                        st.dataframe(results_df, use_container_width=True)
+                        
+                        # Performance info
+                        st.info(f"⚡ Calculation completed in {execution_time:.4f} seconds")
+                        st.info(f"🧬 {len(results)} genetic parameters calculated")
+                    
+                    with res_tab3:
+                        st.subheader("Export Options")
+                        
+                        # JSON export
+                        if st.button("📄 Export as JSON", key="quantum_json_export"):
+                            json_data = export_results_json(results, "quantum_genetics_results.json")
+                            st.download_button(
+                                label="Download JSON File",
+                                data=json_data,
+                                file_name="quantum_genetics_results.json",
+                                mime="application/json",
+                                key="quantum_json_download"
+                            )
+                        
+                        # CSV export
+                        if st.button("📊 Export as CSV", key="quantum_csv_export"):
+                            csv_data = export_results_csv(results, "quantum_genetics_results.csv")
+                            st.download_button(
+                                label="Download CSV File",
+                                data=csv_data,
+                                file_name="quantum_genetics_results.csv",
+                                mime="text/csv",
+                                key="quantum_csv_download"
+                            )
+                        
+                        # Display raw JSON for copy-paste
+                        with st.expander("View Raw JSON"):
+                            st.json(results)
                 
-                with col2a:
-                    st.metric("Genetic Superposition", f"{results['geneticSuperposition']:.6f}")
-                    st.metric("Quantum Coherence", f"{results['quantumCoherence']:.3e}")
-                    st.metric("Tunnel Probability", f"{results['tunnelProbability']:.8f}")
-                    st.metric("Quantum Leap Potential", f"{results['quantumLeapPotential']:.6f}")
+                else:
+                    # Handle calculation error
+                    st.session_state.performance_stats['total_calculations'] += 1
+                    st.session_state.performance_stats['failed_calculations'] += 1
+                    performance_monitor.record_calculation(execution_time, False)
+                    
+                    display_error_message(calculation_result["error"], "Quantum Genetics Calculation")
+                    
+            except ValueError as e:
+                execution_time = time.time() - start_time
+                st.session_state.performance_stats['total_calculations'] += 1
+                st.session_state.performance_stats['failed_calculations'] += 1
+                performance_monitor.record_calculation(execution_time, False)
                 
-                with col2b:
-                    st.metric("Fitness Gradient", f"{results['fitnessGradient']:.3e}")
-                    st.metric("Speciation Probability", f"{results['speciationProbability']:.4f}")
-                    st.metric("Evolution Acceleration", f"{results['evolutionAcceleration']:.8f}")
-                    st.metric("Next Evolution Step", f"{results['nextEvolutionStep']}")
-                
-                # Export functionality
-                if st.button("Export Results as JSON", key="quantum_json"):
-                    st.json(results)
-                
-                # Download as CSV
-                df = pd.DataFrame([results])
-                csv = df.to_csv(index=False)
-                st.download_button(
-                    label="Download Results as CSV",
-                    data=csv,
-                    file_name="quantum_genetics_results.csv",
-                    mime="text/csv",
-                    key="quantum_csv"
-                )
+                display_error_message(str(e), "Input Validation")
                 
             except Exception as e:
-                st.error(f"Calculation error: {str(e)}")
-                st.error("Please check your input parameters and try again.")
+                execution_time = time.time() - start_time
+                st.session_state.performance_stats['total_calculations'] += 1
+                st.session_state.performance_stats['failed_calculations'] += 1
+                performance_monitor.record_calculation(execution_time, False)
+                
+                display_error_message(f"Unexpected error: {str(e)}", "System Error")
 
 # Footer with additional information
 st.markdown("---")
-st.markdown("""
+st.markdown(f"""
 ### About This Calculator
-This scientific calculator performs advanced calculations for:
+**{ProductionConfig.APP_NAME}**  
+Version {ProductionConfig.APP_VERSION} | {ProductionConfig.WATERMARK_ID}
+
+This professional-grade scientific calculator performs advanced calculations for:
 - **Vacuum Energy**: Theoretical calculations based on quantum field theory
 - **Quantum Genetics**: Quantum mechanical effects in genetic algorithms
 
-All calculations use established scientific formulas and constants. Results are provided in scientific notation for precision.
+All calculations use established scientific formulas and constants from peer-reviewed literature. Results are provided in scientific notation for maximum precision and accuracy.
+
+### Technical Specifications
+- **High-Precision Computing**: NumPy and SciPy libraries
+- **Real-Time Processing**: Sub-second calculation times
+- **Production-Ready**: Input validation and error handling
+- **Export Capabilities**: JSON and CSV formats with metadata
+- **Performance Monitoring**: Built-in analytics and logging
 """)
 
-# Performance note
-st.info("💡 **Performance Note**: All calculations are performed in real-time with high precision using NumPy and SciPy libraries.")
+# License and usage information
+st.info("""
+**📜 Licensing Information**  
+This software is available under multiple licensing options:
+- MIT License for educational use
+- Business License for commercial applications  
+- Proprietary License for full rights
+- NDA License for confidential research
+
+Contact the author for licensing inquiries and custom development.
+""")
+
+# Technical support and contact
+st.markdown(f"""
+---
+**© {ProductionConfig.APP_AUTHOR}** | **Watermark ID:** {ProductionConfig.WATERMARK_ID}  
+All rights reserved. Unauthorized use is prohibited.
+""")
