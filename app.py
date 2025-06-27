@@ -1,19 +1,44 @@
 import streamlit as st
 import numpy as np
 import pandas as pd
+import time
+import logging
 from vacuum_energy import VacuumEnergyCalculator
 from quantum_genetics import QuantumGeneticsCalculator
+from config import ProductionConfig
+from utils import (
+    log_calculation, safe_calculation, validate_input_range,
+    display_error_message, display_success_message, export_results_json,
+    export_results_csv, create_results_summary, check_calculation_limits,
+    log_user_interaction, performance_monitor, CalculationError
+)
 
 # Set page configuration
 st.set_page_config(
-    page_title="Scientific Calculator - Vacuum Energy & Quantum Genetics",
+    page_title=ProductionConfig.APP_NAME,
     page_icon="⚛️",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-# Add copyright notice
-st.sidebar.markdown("""
+# Initialize session state for performance monitoring
+if 'performance_stats' not in st.session_state:
+    st.session_state.performance_stats = {
+        'total_calculations': 0,
+        'successful_calculations': 0,
+        'failed_calculations': 0
+    }
+
+# Add copyright notice and app info
+st.sidebar.markdown(f"""
 ---
+### Application Info
+**Version:** {ProductionConfig.APP_VERSION}  
+**Author:** {ProductionConfig.APP_AUTHOR}  
+**Watermark:** {ProductionConfig.WATERMARK_ID}
+
+---
+### Copyright Notice
 © Ervin Remus Radosavlevici  
 All rights reserved.
 
@@ -26,6 +51,15 @@ Unauthorized reproduction, resale, modification, or use for AI model training is
 Includes embedded watermark and creation timestamp for verification.
 
 Violations will result in legal action.
+
+---
+### License Options
+- **MIT License**: Educational use
+- **Business License**: Commercial use
+- **Proprietary License**: Full rights
+- **NDA License**: Confidential research
+
+Contact for licensing information.
 """)
 
 # Main title
@@ -95,48 +129,122 @@ with tab1:
         st.subheader("Results")
         
         if calculate_vacuum:
+            start_time = time.time()
+            log_user_interaction("vacuum_energy_calculation", {
+                "volume": volume,
+                "cutoff_frequency": cutoff_frequency,
+                "extraction_factor": extraction_factor,
+                "temperature": temperature
+            })
+            
             try:
+                # Validate input parameters
+                limits = ProductionConfig.get_calculation_limits()
+                validate_input_range(cutoff_frequency, limits["cutoff_frequency"]["min"], 
+                                   limits["cutoff_frequency"]["max"], "Cutoff Frequency")
+                validate_input_range(volume, limits["volume"]["min"], 
+                                   limits["volume"]["max"], "Volume")
+                
+                # Perform calculation with error handling
                 calculator = VacuumEnergyCalculator()
-                results = calculator.calculate_all(
+                calculation_result = safe_calculation(
+                    calculator.calculate_all,
                     planck_constant, speed_of_light, volume, 
                     cutoff_frequency, extraction_factor, temperature
                 )
                 
-                # Display results in a formatted way
-                st.success("Calculations completed successfully!")
+                execution_time = time.time() - start_time
                 
-                # Create metrics display
-                col2a, col2b = st.columns(2)
+                if calculation_result["success"]:
+                    results = calculation_result["result"]
+                    
+                    # Update performance stats
+                    st.session_state.performance_stats['total_calculations'] += 1
+                    st.session_state.performance_stats['successful_calculations'] += 1
+                    performance_monitor.record_calculation(execution_time, True)
+                    
+                    display_success_message("Vacuum Energy Calculation", execution_time)
+                    
+                    # Create results summary
+                    results_df = create_results_summary(results)
+                    
+                    # Display results in tabs
+                    res_tab1, res_tab2, res_tab3 = st.tabs(["📊 Results", "📈 Summary", "📁 Export"])
+                    
+                    with res_tab1:
+                        # Create metrics display
+                        col2a, col2b = st.columns(2)
+                        
+                        with col2a:
+                            st.metric("Vacuum Energy Density", f"{results['vacuumEnergyDensity']} J/m³")
+                            st.metric("Total Vacuum Energy", f"{results['totalVacuumEnergy']} J")
+                            st.metric("Harvestable Energy", f"{results['harvestableEnergy']} J")
+                            st.metric("Power Output", f"{results['powerOutput']} W")
+                        
+                        with col2b:
+                            st.metric("Extraction Efficiency", f"{results['extractionEfficiency']}%")
+                            st.metric("Vacuum Resistance", f"{results['vacuumResistance']} Ω")
+                            st.metric("Energy Yield/Second", f"{results['energyYieldPerSecond']} J/s")
+                            st.metric("Feasibility Index", f"{results['feasibilityIndex']:.2f}")
+                    
+                    with res_tab2:
+                        st.subheader("Calculation Summary")
+                        st.dataframe(results_df, use_container_width=True)
+                        
+                        # Performance info
+                        st.info(f"⚡ Calculation completed in {execution_time:.4f} seconds")
+                        st.info(f"🔬 {len(results)} parameters calculated")
+                    
+                    with res_tab3:
+                        st.subheader("Export Options")
+                        
+                        # JSON export
+                        if st.button("📄 Export as JSON", key="vacuum_json"):
+                            json_data = export_results_json(results, "vacuum_energy_results.json")
+                            st.download_button(
+                                label="Download JSON File",
+                                data=json_data,
+                                file_name="vacuum_energy_results.json",
+                                mime="application/json"
+                            )
+                        
+                        # CSV export
+                        if st.button("📊 Export as CSV", key="vacuum_csv"):
+                            csv_data = export_results_csv(results, "vacuum_energy_results.csv")
+                            st.download_button(
+                                label="Download CSV File",
+                                data=csv_data,
+                                file_name="vacuum_energy_results.csv",
+                                mime="text/csv"
+                            )
+                        
+                        # Display raw JSON for copy-paste
+                        with st.expander("View Raw JSON"):
+                            st.json(results)
                 
-                with col2a:
-                    st.metric("Vacuum Energy Density", f"{results['vacuumEnergyDensity']:.3e} J/m³")
-                    st.metric("Total Vacuum Energy", f"{results['totalVacuumEnergy']:.3e} J")
-                    st.metric("Harvestable Energy", f"{results['harvestableEnergy']:.3e} J")
-                    st.metric("Power Output", f"{results['powerOutput']:.3e} W")
+                else:
+                    # Handle calculation error
+                    st.session_state.performance_stats['total_calculations'] += 1
+                    st.session_state.performance_stats['failed_calculations'] += 1
+                    performance_monitor.record_calculation(execution_time, False)
+                    
+                    display_error_message(calculation_result["error"], "Vacuum Energy Calculation")
+                    
+            except ValueError as e:
+                execution_time = time.time() - start_time
+                st.session_state.performance_stats['total_calculations'] += 1
+                st.session_state.performance_stats['failed_calculations'] += 1
+                performance_monitor.record_calculation(execution_time, False)
                 
-                with col2b:
-                    st.metric("Extraction Efficiency", f"{results['extractionEfficiency']:.2f}%")
-                    st.metric("Vacuum Resistance", f"{results['vacuumResistance']:.3e} Ω")
-                    st.metric("Energy Yield/Second", f"{results['energyYieldPerSecond']:.3e} J/s")
-                    st.metric("Feasibility Index", f"{results['feasibilityIndex']:.2f}")
-                
-                # Export functionality
-                if st.button("Export Results as JSON"):
-                    st.json(results)
-                
-                # Download as CSV
-                df = pd.DataFrame([results])
-                csv = df.to_csv(index=False)
-                st.download_button(
-                    label="Download Results as CSV",
-                    data=csv,
-                    file_name="vacuum_energy_results.csv",
-                    mime="text/csv"
-                )
+                display_error_message(str(e), "Input Validation")
                 
             except Exception as e:
-                st.error(f"Calculation error: {str(e)}")
-                st.error("Please check your input parameters and try again.")
+                execution_time = time.time() - start_time
+                st.session_state.performance_stats['total_calculations'] += 1
+                st.session_state.performance_stats['failed_calculations'] += 1
+                performance_monitor.record_calculation(execution_time, False)
+                
+                display_error_message(f"Unexpected error: {str(e)}", "System Error")
 
 with tab2:
     st.header("Quantum Genetic Algorithm Calculations")
